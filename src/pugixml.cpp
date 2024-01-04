@@ -35,6 +35,7 @@
 #	include <istream>
 #	include <ostream>
 #	include <string>
+#include <sstream>
 #endif
 
 // For placement new
@@ -226,9 +227,66 @@ PUGI_IMPL_NS_BEGIN
 	typedef xml_memory_management_function_storage<int> xml_memory;
 PUGI_IMPL_NS_END
 
+#include <iomanip>
+
 // String utilities
 PUGI_IMPL_NS_BEGIN
-	// Get string length
+
+class StringToFloat {
+    // create a locale once
+#if defined PUGIXML_USE_STRTOD_L
+#include <locale.h>
+    locale_t loc = nullptr;
+#elif defined PUGIXML_USE_STRTOD_L
+#else
+#endif
+public:
+    StringToFloat() {
+#ifdef PUGIXML_USE_STRTOD_L
+        loc = newlocale(LC_ALL, "C", (locale_t)0 );
+#endif
+    };
+    ~StringToFloat() {
+#ifdef PUGIXML_USE_STRTOD_L
+        if(loc)
+            freelocale(loc);
+#endif
+    };
+    template<typename TFloat>
+    TFloat convert(const char* value) {
+#ifdef PUGIXML_USE_STRTOD
+        // this one has problems with locales
+        if constexpr (std::is_same<TFloat, double>::value)
+            return strtod(value, 0);
+        else if constexpr (std::is_same<TFloat, float>::value)
+            return strtof(value, 0);
+        else
+            return strtod(value, 0);
+#elif defined PUGIXML_USE_STRTOD_L
+        if constexpr (std::is_same<TFloat, double>::value)
+            return strtod_l(value, 0, loc);
+        else if constexpr (std::is_same<TFloat, float>::value)
+            return strtof_l(value, 0, loc);
+        else
+            return strtod_l(value, 0, loc);
+#else
+        std::stringstream stream(value);
+        TFloat res = TFloat();
+        stream >> res;
+        return res;
+#endif
+    }
+    //         PUGI__SNPRINTF(buf, "%.*g", precision, double(value));
+    template<typename TFloat>
+    std::string convert(int precision, TFloat value) {
+        std::ostringstream oss;
+        oss.imbue(std::locale("C"));  
+        oss << /*std::fixed <<*/ std::setprecision(precision) << value;
+        return oss.str();
+    }
+} string_to_float;
+
+    // Get string length
 	PUGI_IMPL_FN size_t strlength(const char_t* s)
 	{
 		assert(s);
@@ -4646,7 +4704,7 @@ PUGI_IMPL_NS_BEGIN
 	#ifdef PUGIXML_WCHAR_MODE
 		return wcstod(value, NULL);
 	#else
-		return strtod(value, NULL);
+		return string_to_float.convert<double>(value); 
 	#endif
 	}
 
@@ -4655,7 +4713,7 @@ PUGI_IMPL_NS_BEGIN
 	#ifdef PUGIXML_WCHAR_MODE
 		return static_cast<float>(wcstod(value, NULL));
 	#else
-		return static_cast<float>(strtod(value, NULL));
+		return string_to_float.convert<float>(value); 
 	#endif
 	}
 
@@ -4730,19 +4788,21 @@ PUGI_IMPL_NS_BEGIN
 	template <typename String, typename Header>
 	PUGI_IMPL_FN bool set_value_convert(String& dest, Header& header, uintptr_t header_mask, float value, int precision)
 	{
-		char buf[128];
-		PUGI_IMPL_SNPRINTF(buf, "%.*g", precision, double(value));
-
-		return set_value_ascii(dest, header, header_mask, buf);
+		//char buf[128];
+		//PUGI__SNPRINTF(buf, "%.*g", precision, double(value));
+        std::string buf = string_to_float.convert(precision, value);
+        
+		return set_value_ascii(dest, header, header_mask, const_cast<char*>(buf.data()));
 	}
 
 	template <typename String, typename Header>
 	PUGI_IMPL_FN bool set_value_convert(String& dest, Header& header, uintptr_t header_mask, double value, int precision)
 	{
-		char buf[128];
-		PUGI_IMPL_SNPRINTF(buf, "%.*g", precision, value);
+		//char buf[128];
+		//PUGI__SNPRINTF(buf, "%.*g", precision, value);
+        std::string buf = string_to_float.convert(precision, value);
 
-		return set_value_ascii(dest, header, header_mask, buf);
+		return set_value_ascii(dest, header, header_mask, const_cast<char*>(buf.data()));
 	}
 
 	template <typename String, typename Header>
@@ -8625,7 +8685,7 @@ PUGI_IMPL_NS_BEGIN
 	#ifdef PUGIXML_WCHAR_MODE
 		return wcstod(string, NULL);
 	#else
-		return strtod(string, NULL);
+		return string_to_float.convert<double>(string); 
 	#endif
 	}
 
